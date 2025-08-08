@@ -35,13 +35,15 @@ def initialize_firestore():
         logging.info("Firestore client initialized successfully.")
         return db
     except Exception as e:
+        # ★★★ 修正箇所 ★★★
+        # エラーの原因を特定するため、詳細なエラー情報を画面に表示する
         logging.error(f"Firestore initialization failed: {e}")
-        st.error("データベースへの接続に失敗しました。管理者にお問い合わせください。")
+        st.error("データベースへの接続中にエラーが発生しました。")
+        st.exception(e) # 詳細なエラー情報を表示
         st.stop()
 
 db = initialize_firestore()
 
-# --- ★★★ 修正箇所 ★★★ ---
 # --- 認証情報とAPIキーの管理 ---
 def generate_fernet_key(secret_string: str) -> bytes:
     """任意の文字列からFernetが要求する形式のキーを生成する"""
