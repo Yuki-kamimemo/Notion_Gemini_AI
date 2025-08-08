@@ -1,5 +1,5 @@
 config.yaml
 user_api_keys.json
-.venv
+.venv/
 .env
 __pycache__/
