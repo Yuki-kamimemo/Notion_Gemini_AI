@@ -7,3 +7,5 @@ trafilatura
 httpx
 pdfplumber
 python-docx
+streamlit-authenticator
+bcrypt
