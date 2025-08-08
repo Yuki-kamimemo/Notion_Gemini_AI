@@ -1,12 +1,5 @@
-# 認証情報
 config.yaml
 user_api_keys.json
-
-# 仮想環境
 .venv
-
-# APIキー
 .env
-
-# Pythonキャッシュ
 __pycache__/
