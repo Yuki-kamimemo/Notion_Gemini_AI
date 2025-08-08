@@ -3,20 +3,17 @@ import streamlit as st
 import google.generativeai as genai
 from dotenv import load_dotenv
 import notion_client
-import yaml
 import streamlit_authenticator as stauth
-import json
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import base64
 import logging
 import traceback
+from google.oauth2 import service_account
+from google.cloud import firestore
 
 from notion_utils import get_all_databases, get_pages_in_database
 from core_logic import run_new_page_process, run_edit_page_process
 
-# .envファイルから環境変数を読み込む
+# .envファイルから環境変数を読み込む (ローカル開発用)
 load_dotenv()
 
 # --- ログ設定 ---
@@ -25,69 +22,84 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- Streamlit UI設定 ---
 st.set_page_config(page_title="Notion記事自動生成AI", layout="wide")
 
-# --- 認証設定の読み込み ---
-try:
-    with open('config.yaml', 'r', encoding='utf-8') as file:
-        config = yaml.load(file, Loader=yaml.SafeLoader)
-except FileNotFoundError:
-    st.error("設定ファイル(config.yaml)が見つかりません。")
-    st.stop()
-
-# --- APIキー管理関数 ---
-# Cookieのキーをソルトとして利用し、暗号化キーを生成
-def get_encryption_key(salt_str: str) -> bytes:
-    salt = salt_str.encode()
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=480000,
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(salt))
-    return key
-
-# 暗号化キーの取得
-encryption_key = get_encryption_key(config['cookie']['key'])
-fernet = Fernet(encryption_key)
-API_KEYS_FILE = "user_api_keys.json"
-
-def save_api_keys(username, notion_key, gemini_key):
-    """ユーザーのAPIキーを暗号化してJSONファイルに保存"""
+# --- Firestore 初期化 ---
+@st.cache_resource
+def initialize_firestore():
+    """Firestoreクライアントを初期化する"""
     try:
-        with open(API_KEYS_FILE, 'r') as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
+        # Streamlit Secretsから認証情報を取得
+        creds_json = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
+        creds = service_account.Credentials.from_service_account_info(creds_json)
+        db = firestore.Client(credentials=creds)
+        logging.info("Firestore client initialized successfully.")
+        return db
+    except Exception as e:
+        logging.error(f"Firestore initialization failed: {e}")
+        st.error("データベースへの接続に失敗しました。管理者にお問い合わせください。")
+        st.stop()
+
+db = initialize_firestore()
+
+# --- 認証情報管理 (Firestore) ---
+@st.cache_data(ttl=600) # 10分間キャッシュする
+def fetch_config_from_firestore():
+    """Firestoreからユーザー情報を取得し、authenticator用のconfigを生成"""
+    logging.info("Fetching user credentials from Firestore...")
+    users_ref = db.collection('users').stream()
+    credentials = {'usernames': {}}
+    for user_doc in users_ref:
+        user_data = user_doc.to_dict()
+        credentials['usernames'][user_doc.id] = {
+            'email': user_data.get('email'),
+            'name': user_data.get('name'),
+            'password': user_data.get('password') # Firestoreにはハッシュ化済みパスワードを保存
+        }
     
+    config = {
+        'credentials': credentials,
+        'cookie': {
+            'expiry_days': 30,
+            'key': st.secrets["ENCRYPTION_SECRET"], # Secretsからキーを取得
+            'name': 'notion_ai_cookie'
+        },
+        'preauthorized': {'emails': []} # 事前承認は今回は使用しない
+    }
+    logging.info("Successfully fetched and built config from Firestore.")
+    return config
+
+# --- APIキー管理 (Firestore & 暗号化) ---
+fernet = Fernet(st.secrets["ENCRYPTION_SECRET"].encode())
+
+def save_api_keys_to_firestore(username, notion_key, gemini_key):
+    """ユーザーのAPIキーを暗号化してFirestoreに保存"""
     encrypted_notion = fernet.encrypt(notion_key.encode()).decode()
     encrypted_gemini = fernet.encrypt(gemini_key.encode()).decode()
     
-    data[username] = {
+    user_ref = db.collection('users').document(username)
+    user_ref.update({
         'notion_api_key': encrypted_notion,
         'gemini_api_key': encrypted_gemini
-    }
-    
-    with open(API_KEYS_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
+    })
+    logging.info(f"API keys saved for user: {username}")
+    st.cache_data.clear() # APIキーを更新したのでキャッシュをクリア
 
-def load_api_keys(username):
-    """JSONファイルからユーザーのAPIキーを読み込み復号して返す"""
-    try:
-        with open(API_KEYS_FILE, 'r') as f:
-            data = json.load(f)
-        
-        user_data = data.get(username)
-        if not user_data:
-            return None
-            
-        decrypted_notion = fernet.decrypt(user_data['notion_api_key'].encode()).decode()
-        decrypted_gemini = fernet.decrypt(user_data['gemini_api_key'].encode()).decode()
-        
-        return {'notion': decrypted_notion, 'gemini': decrypted_gemini}
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        return None
+def load_api_keys_from_firestore(username):
+    """FirestoreからユーザーのAPIキーを読み込み復号して返す"""
+    user_ref = db.collection('users').document(username)
+    user_doc = user_ref.get()
+    if user_doc.exists:
+        user_data = user_doc.to_dict()
+        try:
+            decrypted_notion = fernet.decrypt(user_data['notion_api_key'].encode()).decode()
+            decrypted_gemini = fernet.decrypt(user_data['gemini_api_key'].encode()).decode()
+            return {'notion': decrypted_notion, 'gemini': decrypted_gemini}
+        except (KeyError, TypeError):
+            return None # APIキーがまだ保存されていない
+    return None
 
-# --- Authenticatorオブジェクトの初期化 ---
+# --- メインアプリケーション ---
+config = fetch_config_from_firestore()
+
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
@@ -95,19 +107,16 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# --- ログインウィジェットの表示 ---
 authenticator.login(
     location='main',
     fields={'Form name': 'ログイン', 'Username': 'ユーザー名', 'Password': 'パスワード', 'Login': 'ログイン'}
 )
 
-# --- 認証ステータスに応じた処理分岐 ---
 if st.session_state["authentication_status"]:
     # --- ログイン成功後の処理 ---
     st.sidebar.title(f'ようこそ, *{st.session_state["name"]}* さん')
     authenticator.logout('ログアウト', 'sidebar')
 
-    # --- APIキー設定UI ---
     with st.sidebar.expander("APIキー設定"):
         st.info("ご自身のNotionとGeminiのAPIキーを入力してください。")
         with st.form("api_key_form", clear_on_submit=True):
@@ -116,25 +125,22 @@ if st.session_state["authentication_status"]:
             submitted = st.form_submit_button("保存")
             if submitted:
                 if notion_key_input and gemini_key_input:
-                    save_api_keys(st.session_state["username"], notion_key_input, gemini_key_input)
+                    save_api_keys_to_firestore(st.session_state["username"], notion_key_input, gemini_key_input)
                     st.success("APIキーを保存しました！")
                 else:
                     st.warning("両方のAPIキーを入力してください。")
 
-    # --- ユーザーのAPIキーを読み込み ---
-    user_api_keys = load_api_keys(st.session_state["username"])
+    user_api_keys = load_api_keys_from_firestore(st.session_state["username"])
 
     if not user_api_keys:
         st.warning("APIキーが設定されていません。サイドバーの「APIキー設定」から登録してください。")
         st.stop()
 
-    # ↓↓↓↓ ここから下が元のアプリケーションのメインロジックです ↓↓↓↓
+    # (ここから下のメインUIロジックは、APIクライアント初期化以外はほぼ変更なし)
     st.title("📝 Notion記事自動生成AI")
     st.markdown("Webの最新情報やお手元のドキュメントを元に、Notionページの作成から編集までを自動化します。")
-
-    # --- APIクライアントの初期化 ---
+    
     try:
-        # ユーザーが切り替わった場合、またはクライアントが未初期化の場合のみ実行
         if st.session_state.get('current_user') != st.session_state["username"] or 'clients_initialized' not in st.session_state:
             st.session_state.notion_client = notion_client.Client(auth=user_api_keys['notion'])
             genai.configure(api_key=user_api_keys['gemini'])
@@ -142,15 +148,15 @@ if st.session_state["authentication_status"]:
             GEMINI_LITE_MODEL_NAME = os.getenv("GEMINI_LITE_MODEL", "gemini-2.5-flash-lite")
             st.session_state.gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
             st.session_state.gemini_lite_model = genai.GenerativeModel(GEMINI_LITE_MODEL_NAME)
-            st.session_state.notion_client.users.me() # Notion APIへの接続確認
+            st.session_state.notion_client.users.me()
             st.session_state.clients_initialized = True
-            st.session_state.current_user = st.session_state["username"] # 現在のユーザーを記録
+            st.session_state.current_user = st.session_state["username"]
             st.toast(f"✅ APIクライアントの準備ができました")
     except Exception as e:
         st.error(f"APIクライアントの初期化中にエラーが発生しました。APIキーが正しいか確認してください。\n\nエラー詳細: {e}")
         st.stop()
-
-    # --- メインUI ---
+    
+    # (メインUIの残り... 省略)
     with st.spinner("データベースを読み込んでいます..."):
         databases = get_all_databases(st.session_state.notion_client)
 
@@ -163,7 +169,6 @@ if st.session_state["authentication_status"]:
     mode = st.radio("2. 実行する操作を選択してください", ("新しいページを作成する", "既存のページを編集・追記する"), horizontal=True)
     st.markdown("---")
 
-    # --- ペルソナ選択肢の定義 ---
     persona_options = {
         "プロのライター": "あなたはプロのライターです。",
         "マーケティング担当者": "あなたは経験豊富なマーケティング担当者です。読者のエンゲージメントを高めることを意識してください。",
@@ -173,7 +178,6 @@ if st.session_state["authentication_status"]:
         "カスタム": "カスタム...",
     }
 
-    # --- プロンプトテンプレートの定義 ---
     prompt_templates = {
         "記事作成": "{topic}について、読者の興味を引く魅力的な記事を作成してください。",
         "要約": "{topic}について、重要なポイントを箇条書きで分かりやすく要約してください。",
@@ -183,7 +187,6 @@ if st.session_state["authentication_status"]:
         "カスタム": "カスタム...",
     }
 
-    # --- フォーム入力 ---
     if mode == "新しいページを作成する":
         st.subheader("新しいページを作成")
         with st.form("new_page_form"):
@@ -282,64 +285,37 @@ if st.session_state["authentication_status"]:
                     status_placeholder = st.empty()
                     results_placeholder = st.empty()
                     run_edit_page_process(selected_page_id, final_prompt_edit, ai_persona_edit, uploaded_files_edit, source_url_edit, search_count_edit, full_text_token_limit_edit, status_placeholder, results_placeholder)
-    
-    # --- ★重要★ 認証情報をファイルに保存 ---
-    try:
-        with open('config.yaml', 'w', encoding='utf-8') as file:
-            yaml.dump(config, file, default_flow_style=False)
-    except Exception as e:
-        st.error(f"設定ファイルの保存中にエラーが発生しました: {e}")
 
-
-# --- ログイン失敗時、または未ログイン時の表示 ---
 elif st.session_state["authentication_status"] is False:
     st.error('ユーザー名かパスワードが間違っています')
+
 elif st.session_state["authentication_status"] is None:
     st.warning('ユーザー名とパスワードを入力してください')
     
-    # --- ★★★ 新規ユーザー登録機能（エラーハンドリング強化版） ★★★ ---
-    logging.info("ユーザー未認証。新規登録ウィジェットの表示を試みます。")
     try:
-        # 修正案
-        email_of_registered_user, username_of_registered_user, name_of_registered_user = authenticator.register_user(
+        email, username, name = authenticator.register_user(
             location='main',
-            fields={
-                'Form name': '新規ユーザー登録', 
-                'Username': 'ユーザー名(半角英数字のみ)', 
-                'Email': 'メールアドレス', 
-                'First name': '姓', # 'First name' を追加
-                'Last name': '名', # 'Last name' を追加
-                'Password': 'パスワード', 
-                'Repeat password': 'パスワードを再入力', 
-                'Password hint': 'パスワードのヒント', # 'Password hint' を追加
-                'Captcha': '下の画像に表示されている数字を記入してください', # 'Captcha' を追加
-                'Register': '登録する'
-            }
+            fields={'Form name': '新規ユーザー登録', 'Username': 'ユーザー名 (半角英数字のみ)', 'Email': 'メールアドレス', 'Name': '氏名', 'Password': 'パスワード', 'Repeat password': 'パスワードを再入力', 'Register': '登録する'}
         )
         
-        logging.info(f"register_userが値を返しました: email={email_of_registered_user}")
-
-        if email_of_registered_user:
-            logging.info(f"ユーザー登録成功: {username_of_registered_user}")
-            st.success('ユーザー登録が成功しました。ログインしてください。')
-            try:
-                with open('config.yaml', 'w', encoding='utf-8') as file:
-                    yaml.dump(config, file, default_flow_style=False)
-                logging.info("config.yamlへの書き込みが成功しました。")
-            except Exception as e_write:
-                logging.error(f"config.yamlへの書き込み中にエラーが発生しました: {e_write}")
-                st.error(f"設定ファイルの保存中にエラーが発生しました: {e_write}")
+        if email:
+            # authenticatorが内部のconfigを更新するので、そこからハッシュ化済みパスワードを取得
+            hashed_password = config['credentials']['usernames'][username]['password']
+            # 新規ユーザー情報をFirestoreに保存
+            user_ref = db.collection('users').document(username)
+            user_ref.set({
+                'name': name,
+                'email': email,
+                'password': hashed_password
+            })
+            st.success('ユーザー登録が成功しました。再度ログインしてください。')
+            st.cache_data.clear() # ユーザーリストが変わったのでキャッシュをクリア
 
     except stauth.utilities.exceptions.RegisterError as e:
-        # パスワードポリシー違反などの登録エラーを、日本語で分かりやすく表示
         error_message = str(e)
         if "Password must" in error_message:
             st.error("パスワードは以下の要件を満たす必要があります：\n- 8文字以上\n- 1つ以上の小文字を含む\n- 1つ以上の大文字を含む\n- 1つ以上の数字を含む\n- 1つ以上の特殊文字を含む (@$!%*?&)")
         else:
             st.error(e)
-        logging.warning(f"ユーザー登録エラー: {e}")
     except Exception as e:
-        # その他の予期せぬエラー
-        logging.error("register_userウィジェットで予期せぬエラーが発生しました。")
-        logging.error(traceback.format_exc()) # 完全なトレースバックをログに出力
         st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
