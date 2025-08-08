@@ -11,3 +11,4 @@ streamlit-authenticator
 bcrypt
 PyYAML
 cryptography
+google-cloud-firestore
