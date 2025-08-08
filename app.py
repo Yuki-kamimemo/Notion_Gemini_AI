@@ -4,8 +4,12 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 import notion_client
 import yaml
-# 公式ドキュメントに沿ったimport
 import streamlit_authenticator as stauth
+import json
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
 
 from notion_utils import get_all_databases, get_pages_in_database
 from core_logic import run_new_page_process, run_edit_page_process
@@ -24,6 +28,60 @@ except FileNotFoundError:
     st.error("設定ファイル(config.yaml)が見つかりません。")
     st.stop()
 
+# --- APIキー管理関数 ---
+# Cookieのキーをソルトとして利用し、暗号化キーを生成
+def get_encryption_key(salt_str: str) -> bytes:
+    salt = salt_str.encode()
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=480000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(salt))
+    return key
+
+# 暗号化キーの取得
+encryption_key = get_encryption_key(config['cookie']['key'])
+fernet = Fernet(encryption_key)
+API_KEYS_FILE = "user_api_keys.json"
+
+def save_api_keys(username, notion_key, gemini_key):
+    """ユーザーのAPIキーを暗号化してJSONファイルに保存"""
+    try:
+        with open(API_KEYS_FILE, 'r') as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    
+    encrypted_notion = fernet.encrypt(notion_key.encode()).decode()
+    encrypted_gemini = fernet.encrypt(gemini_key.encode()).decode()
+    
+    data[username] = {
+        'notion_api_key': encrypted_notion,
+        'gemini_api_key': encrypted_gemini
+    }
+    
+    with open(API_KEYS_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
+def load_api_keys(username):
+    """JSONファイルからユーザーのAPIキーを読み込み復号して返す"""
+    try:
+        with open(API_KEYS_FILE, 'r') as f:
+            data = json.load(f)
+        
+        user_data = data.get(username)
+        if not user_data:
+            return None
+            
+        decrypted_notion = fernet.decrypt(user_data['notion_api_key'].encode()).decode()
+        decrypted_gemini = fernet.decrypt(user_data['gemini_api_key'].encode()).decode()
+        
+        return {'notion': decrypted_notion, 'gemini': decrypted_gemini}
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return None
+
 # --- Authenticatorオブジェクトの初期化 ---
 authenticator = stauth.Authenticate(
     config['credentials'],
@@ -33,7 +91,6 @@ authenticator = stauth.Authenticate(
 )
 
 # --- ログインウィジェットの表示 ---
-# locationを'main'から'sidebar'に変更するなど、表示場所を調整可能
 authenticator.login(location='main')
 
 # --- 認証ステータスに応じた処理分岐 ---
@@ -42,35 +99,47 @@ if st.session_state["authentication_status"]:
     st.sidebar.title(f'Welcome *{st.session_state["name"]}*')
     authenticator.logout(location='sidebar')
 
-    # ↓↓↓↓ ここから下が元のアプリケーションのメインロジックです ↓↓↓↓
+    # --- APIキー設定UI ---
+    with st.sidebar.expander("APIキー設定"):
+        st.info("ご自身のNotionとGeminiのAPIキーを入力してください。")
+        with st.form("api_key_form", clear_on_submit=True):
+            notion_key_input = st.text_input("Notion API Key", type="password", key="notion_key")
+            gemini_key_input = st.text_input("Gemini API Key", type="password", key="gemini_key")
+            submitted = st.form_submit_button("保存")
+            if submitted:
+                if notion_key_input and gemini_key_input:
+                    save_api_keys(st.session_state["username"], notion_key_input, gemini_key_input)
+                    st.success("APIキーを保存しました！")
+                else:
+                    st.warning("両方のAPIキーを入力してください。")
 
+    # --- ユーザーのAPIキーを読み込み ---
+    user_api_keys = load_api_keys(st.session_state["username"])
+
+    if not user_api_keys:
+        st.warning("APIキーが設定されていません。サイドバーの「APIキー設定」から登録してください。")
+        st.stop()
+
+    # ↓↓↓↓ ここから下が元のアプリケーションのメインロジックです ↓↓↓↓
     st.title("📝 Notion記事自動生成AI")
     st.markdown("Webの最新情報やお手元のドキュメントを元に、Notionページの作成から編集までを自動化します。")
 
-    # --- APIキーとモデル名の自動読み込みとクライアントの初期化 ---
-    # この部分は将来的にユーザーごとのキーをDBから取得する形に置き換わります
-    NOTION_API_KEY = os.getenv("NOTION_API_KEY")
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    GEMINI_LITE_MODEL_NAME = os.getenv("GEMINI_LITE_MODEL", "gemini-2.5-flash-lite")
-
-    if not NOTION_API_KEY or not GEMINI_API_KEY:
-        st.error("APIキーが設定されていません。.envファイルにキーを記述してください。")
-        st.stop()
-
+    # --- APIクライアントの初期化 ---
     try:
-        # セッションにクライアントが初期化されていない場合のみ実行
-        if 'clients_initialized' not in st.session_state:
-            st.session_state.notion_client = notion_client.Client(auth=NOTION_API_KEY)
-            genai.configure(api_key=GEMINI_API_KEY)
+        # ユーザーが切り替わった場合、またはクライアントが未初期化の場合のみ実行
+        if st.session_state.get('current_user') != st.session_state["username"] or 'clients_initialized' not in st.session_state:
+            st.session_state.notion_client = notion_client.Client(auth=user_api_keys['notion'])
+            genai.configure(api_key=user_api_keys['gemini'])
+            GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            GEMINI_LITE_MODEL_NAME = os.getenv("GEMINI_LITE_MODEL", "gemini-2.5-flash-lite")
             st.session_state.gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
             st.session_state.gemini_lite_model = genai.GenerativeModel(GEMINI_LITE_MODEL_NAME)
-            # Notion APIへの接続確認
-            st.session_state.notion_client.users.me()
+            st.session_state.notion_client.users.me() # Notion APIへの接続確認
             st.session_state.clients_initialized = True
-            st.toast(f"✅ APIクライアントの準備ができました (モデル: {GEMINI_MODEL_NAME})")
+            st.session_state.current_user = st.session_state["username"] # 現在のユーザーを記録
+            st.toast(f"✅ APIクライアントの準備ができました")
     except Exception as e:
-        st.error(f"APIクライアントの初期化中にエラーが発生しました: {e}")
+        st.error(f"APIクライアントの初期化中にエラーが発生しました。APIキーが正しいか確認してください。エラー: {e}")
         st.stop()
 
     # --- メインUI ---
@@ -207,7 +276,6 @@ if st.session_state["authentication_status"]:
                     run_edit_page_process(selected_page_id, final_prompt_edit, ai_persona_edit, uploaded_files_edit, source_url_edit, search_count_edit, full_text_token_limit_edit, status_placeholder, results_placeholder)
     
     # --- ★重要★ 認証情報をファイルに保存 ---
-    # 最初のログイン後、ハッシュ化されたパスワードを保存するために必要
     try:
         with open('config.yaml', 'w', encoding='utf-8') as file:
             yaml.dump(config, file, default_flow_style=False)
