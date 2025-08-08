@@ -9,16 +9,8 @@ import logging
 import traceback
 from google.oauth2 import service_account
 from google.cloud import firestore
-
-# --- デバッグ用コード ---
-st.header("Secretsの診断")
-if "ENCRYPTION_SECRET" in st.secrets:
-    st.success("✅ ENCRYPTION_SECRET がSecretsから正常に読み込まれました。")
-else:
-    st.error("❌ ENCRYPTION_SECRET がSecretsに見つかりません。")
-    st.write("現在読み込まれているSecretsのキー一覧:")
-    st.write(st.secrets.keys())
-# --- デバッグ用コードここまで ---
+import hashlib
+import base64
 
 from notion_utils import get_all_databases, get_pages_in_database
 from core_logic import run_new_page_process, run_edit_page_process
@@ -37,7 +29,6 @@ st.set_page_config(page_title="Notion記事自動生成AI", layout="wide")
 def initialize_firestore():
     """Firestoreクライアントを初期化する"""
     try:
-        # Streamlit Secretsから認証情報を取得
         creds_json = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
         creds = service_account.Credentials.from_service_account_info(creds_json)
         db = firestore.Client(credentials=creds)
@@ -50,8 +41,24 @@ def initialize_firestore():
 
 db = initialize_firestore()
 
-# --- 認証情報管理 (Firestore) ---
-@st.cache_data(ttl=600) # 10分間キャッシュする
+# --- ★★★ 修正箇所 ★★★ ---
+# --- 認証情報とAPIキーの管理 ---
+def generate_fernet_key(secret_string: str) -> bytes:
+    """任意の文字列からFernetが要求する形式のキーを生成する"""
+    hasher = hashlib.sha256()
+    hasher.update(secret_string.encode('utf-8'))
+    return base64.urlsafe_b64encode(hasher.digest())
+
+try:
+    # SecretsからENCRYPTION_SECRETを取得し、それを元にFernetキーを生成
+    fernet_key = generate_fernet_key(st.secrets["ENCRYPTION_SECRET"])
+    fernet = Fernet(fernet_key)
+except KeyError:
+    st.error("ENCRYPTION_SECRETが設定されていません。StreamlitのSecretsを確認してください。")
+    st.stop()
+
+
+@st.cache_data(ttl=600)
 def fetch_config_from_firestore():
     """Firestoreからユーザー情報を取得し、authenticator用のconfigを生成"""
     logging.info("Fetching user credentials from Firestore...")
@@ -62,23 +69,20 @@ def fetch_config_from_firestore():
         credentials['usernames'][user_doc.id] = {
             'email': user_data.get('email'),
             'name': user_data.get('name'),
-            'password': user_data.get('password') # Firestoreにはハッシュ化済みパスワードを保存
+            'password': user_data.get('password')
         }
     
     config = {
         'credentials': credentials,
         'cookie': {
             'expiry_days': 30,
-            'key': st.secrets["ENCRYPTION_SECRET"], # Secretsからキーを取得
+            'key': st.secrets["ENCRYPTION_SECRET"],
             'name': 'notion_ai_cookie'
         },
-        'preauthorized': {'emails': []} # 事前承認は今回は使用しない
+        'preauthorized': {'emails': []}
     }
     logging.info("Successfully fetched and built config from Firestore.")
     return config
-
-# --- APIキー管理 (Firestore & 暗号化) ---
-fernet = Fernet(st.secrets["ENCRYPTION_SECRET"].encode())
 
 def save_api_keys_to_firestore(username, notion_key, gemini_key):
     """ユーザーのAPIキーを暗号化してFirestoreに保存"""
@@ -91,7 +95,7 @@ def save_api_keys_to_firestore(username, notion_key, gemini_key):
         'gemini_api_key': encrypted_gemini
     })
     logging.info(f"API keys saved for user: {username}")
-    st.cache_data.clear() # APIキーを更新したのでキャッシュをクリア
+    st.cache_data.clear()
 
 def load_api_keys_from_firestore(username):
     """FirestoreからユーザーのAPIキーを読み込み復号して返す"""
@@ -104,7 +108,7 @@ def load_api_keys_from_firestore(username):
             decrypted_gemini = fernet.decrypt(user_data['gemini_api_key'].encode()).decode()
             return {'notion': decrypted_notion, 'gemini': decrypted_gemini}
         except (KeyError, TypeError):
-            return None # APIキーがまだ保存されていない
+            return None
     return None
 
 # --- メインアプリケーション ---
