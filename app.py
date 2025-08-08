@@ -10,6 +10,16 @@ import traceback
 from google.oauth2 import service_account
 from google.cloud import firestore
 
+# --- デバッグ用コード ---
+st.header("Secretsの診断")
+if "ENCRYPTION_SECRET" in st.secrets:
+    st.success("✅ ENCRYPTION_SECRET がSecretsから正常に読み込まれました。")
+else:
+    st.error("❌ ENCRYPTION_SECRET がSecretsに見つかりません。")
+    st.write("現在読み込まれているSecretsのキー一覧:")
+    st.write(st.secrets.keys())
+# --- デバッグ用コードここまで ---
+
 from notion_utils import get_all_databases, get_pages_in_database
 from core_logic import run_new_page_process, run_edit_page_process
 
