@@ -2,7 +2,6 @@ streamlit
 google-generativeai
 python-dotenv
 notion-client
-duckduckgo-search
 DDGS
 trafilatura
 httpx
