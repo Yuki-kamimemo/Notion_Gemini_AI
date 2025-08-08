@@ -10,12 +10,17 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
+import logging
+import traceback
 
 from notion_utils import get_all_databases, get_pages_in_database
 from core_logic import run_new_page_process, run_edit_page_process
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
+
+# --- ログ設定 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Streamlit UI設定 ---
 st.set_page_config(page_title="Notion記事自動生成AI", layout="wide")
@@ -91,20 +96,23 @@ authenticator = stauth.Authenticate(
 )
 
 # --- ログインウィジェットの表示 ---
-authenticator.login(location='main')
+authenticator.login(
+    location='main',
+    fields={'Form name': 'ログイン', 'Username': 'ユーザー名', 'Password': 'パスワード', 'Login': 'ログイン'}
+)
 
 # --- 認証ステータスに応じた処理分岐 ---
 if st.session_state["authentication_status"]:
     # --- ログイン成功後の処理 ---
-    st.sidebar.title(f'Welcome *{st.session_state["name"]}*')
-    authenticator.logout(location='sidebar')
+    st.sidebar.title(f'ようこそ, *{st.session_state["name"]}* さん')
+    authenticator.logout('ログアウト', 'sidebar')
 
     # --- APIキー設定UI ---
     with st.sidebar.expander("APIキー設定"):
         st.info("ご自身のNotionとGeminiのAPIキーを入力してください。")
         with st.form("api_key_form", clear_on_submit=True):
-            notion_key_input = st.text_input("Notion API Key", type="password", key="notion_key")
-            gemini_key_input = st.text_input("Gemini API Key", type="password", key="gemini_key")
+            notion_key_input = st.text_input("Notion APIキー", type="password", key="notion_key")
+            gemini_key_input = st.text_input("Gemini APIキー", type="password", key="gemini_key")
             submitted = st.form_submit_button("保存")
             if submitted:
                 if notion_key_input and gemini_key_input:
@@ -139,7 +147,7 @@ if st.session_state["authentication_status"]:
             st.session_state.current_user = st.session_state["username"] # 現在のユーザーを記録
             st.toast(f"✅ APIクライアントの準備ができました")
     except Exception as e:
-        st.error(f"APIクライアントの初期化中にエラーが発生しました。APIキーが正しいか確認してください。エラー: {e}")
+        st.error(f"APIクライアントの初期化中にエラーが発生しました。APIキーが正しいか確認してください。\n\nエラー詳細: {e}")
         st.stop()
 
     # --- メインUI ---
@@ -288,3 +296,50 @@ elif st.session_state["authentication_status"] is False:
     st.error('ユーザー名かパスワードが間違っています')
 elif st.session_state["authentication_status"] is None:
     st.warning('ユーザー名とパスワードを入力してください')
+    
+    # --- ★★★ 新規ユーザー登録機能（エラーハンドリング強化版） ★★★ ---
+    logging.info("ユーザー未認証。新規登録ウィジェットの表示を試みます。")
+    try:
+        # 修正案
+        email_of_registered_user, username_of_registered_user, name_of_registered_user = authenticator.register_user(
+            location='main',
+            fields={
+                'Form name': '新規ユーザー登録', 
+                'Username': 'ユーザー名(半角英数字のみ)', 
+                'Email': 'メールアドレス', 
+                'First name': '姓', # 'First name' を追加
+                'Last name': '名', # 'Last name' を追加
+                'Password': 'パスワード', 
+                'Repeat password': 'パスワードを再入力', 
+                'Password hint': 'パスワードのヒント', # 'Password hint' を追加
+                'Captcha': '下の画像に表示されている数字を記入してください', # 'Captcha' を追加
+                'Register': '登録する'
+            }
+        )
+        
+        logging.info(f"register_userが値を返しました: email={email_of_registered_user}")
+
+        if email_of_registered_user:
+            logging.info(f"ユーザー登録成功: {username_of_registered_user}")
+            st.success('ユーザー登録が成功しました。ログインしてください。')
+            try:
+                with open('config.yaml', 'w', encoding='utf-8') as file:
+                    yaml.dump(config, file, default_flow_style=False)
+                logging.info("config.yamlへの書き込みが成功しました。")
+            except Exception as e_write:
+                logging.error(f"config.yamlへの書き込み中にエラーが発生しました: {e_write}")
+                st.error(f"設定ファイルの保存中にエラーが発生しました: {e_write}")
+
+    except stauth.utilities.exceptions.RegisterError as e:
+        # パスワードポリシー違反などの登録エラーを、日本語で分かりやすく表示
+        error_message = str(e)
+        if "Password must" in error_message:
+            st.error("パスワードは以下の要件を満たす必要があります：\n- 8文字以上\n- 1つ以上の小文字を含む\n- 1つ以上の大文字を含む\n- 1つ以上の数字を含む\n- 1つ以上の特殊文字を含む (@$!%*?&)")
+        else:
+            st.error(e)
+        logging.warning(f"ユーザー登録エラー: {e}")
+    except Exception as e:
+        # その他の予期せぬエラー
+        logging.error("register_userウィジェットで予期せぬエラーが発生しました。")
+        logging.error(traceback.format_exc()) # 完全なトレースバックをログに出力
+        st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
