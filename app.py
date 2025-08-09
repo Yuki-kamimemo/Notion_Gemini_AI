@@ -336,15 +336,12 @@ elif st.session_state["authentication_status"] is None:
         if email:
             logging.info("ユーザー登録情報のFirestore保存処理を開始します。")
 
-            # --- パスワード取得方法を最新版対応に変更 ---
             try:
-                # 新しいstreamlit-authenticatorでは非公開属性 _credentials に保持される
-                updated_credentials = authenticator._credentials['usernames']
-                if username in updated_credentials:
-                    hashed_password = updated_credentials[username]['password']
+                # register_user 実行後に渡した config が更新されているはずなので直接参照
+                if username in config['credentials']['usernames']:
+                    hashed_password = config['credentials']['usernames'][username]['password']
                     logging.debug(f"取得したhashed_password: {hashed_password}")
 
-                    # Firestoreに保存
                     user_ref = db.collection('users').document(username)
                     user_ref.set({
                         'name': name,
@@ -355,11 +352,14 @@ elif st.session_state["authentication_status"] is None:
                     st.success('ユーザー登録が成功しました。再度ログインしてください。')
                     st.cache_data.clear()
                 else:
-                    logging.error(f"ユーザー '{username}' が _credentials に見つかりません。")
+                    logging.error(f"ユーザー '{username}' のパスワード情報がconfigに見つかりません。")
                     st.error("登録情報の取得に失敗しました。もう一度お試しください。")
-            except AttributeError:
-                logging.error("authenticator._credentials が利用できません。バージョン仕様を確認してください。")
-                st.error("ユーザー登録の内部データ取得に失敗しました。")
+
+            except Exception as e:
+                logging.error("Firestore保存処理でエラーが発生しました。")
+                logging.error(traceback.format_exc())
+                st.error("Firestoreへのユーザー登録中にエラーが発生しました。")
+
 
         else:
             logging.info("emailがNoneまたは空のため、Firestore保存処理をスキップしました。")
