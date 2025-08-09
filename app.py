@@ -360,7 +360,7 @@ elif st.session_state["authentication_status"] is None:
         try:
             (username_of_forgotten_password,
              email_of_forgotten_password,
-             new_random_password) = authenticator.forgot_password(location='form')
+             new_random_password) = authenticator.forgot_password(location='main')
 
             if username_of_forgotten_password:
                 st.success('新しい一時パスワードが生成されました。')
