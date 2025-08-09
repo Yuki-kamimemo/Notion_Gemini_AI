@@ -369,7 +369,7 @@ elif st.session_state["authentication_status"] is None:
         try:
             (username_of_forgotten_password,
              email_of_forgotten_password,
-             new_random_password) = authenticator.forgot_password(location='form')
+             new_random_password) = authenticator.forgot_password(location='main')
 
             if username_of_forgotten_password:
                 st.success('新しい一時パスワードが生成されました。')
@@ -391,7 +391,7 @@ elif st.session_state["authentication_status"] is None:
     with st.expander("ユーザー名をお忘れですか？"):
         try:
             (username_of_forgotten_username,
-             email_of_forgotten_username) = authenticator.forgot_username(location='form')
+             email_of_forgotten_username) = authenticator.forgot_username(location='main')
             
             if username_of_forgotten_username:
                 st.success('あなたのユーザー名はこちらです:')
