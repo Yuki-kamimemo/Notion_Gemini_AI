@@ -133,47 +133,7 @@ def fetch_config_from_firestore():
         return None # エラー発生時はNoneを返す
 
 
-# 設定取得
-config = fetch_config_from_firestore()
 
-# Authenticator作成
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days']
-)
-
-# Googleログイン処理（公式の推奨は experimental_guest_login ではなく login + OAuth）
-if "google" in config and "oauth2" in config and st.session_state["authentication_status"] is None:
-    # 呼び出す際に oauth2 の設定を渡す
-    if authenticator.experimental_guest_login(provider="google", location='main', oauth2=config['oauth2']):
-        st.rerun()
-
-# ... (188行目あたり)
-# ログインフォームを表示・処理します。この関数の戻り値は使いません。
-authenticator.login(
-    location='main',
-    fields={'Form name': 'ログイン', 'Username': 'ユーザー名', 'Password': 'パスワード', 'Login': 'ログイン'}
-)
-
-# 認証ステータスは st.session_state から取得します。
-if st.session_state["authentication_status"]:
-    # --- ログイン成功後の処理 ---
-    # Googleログイン経由の新規ユーザーをFirestoreに登録
-    add_or_update_user_in_firestore(
-        st.session_state["username"],
-        st.session_state["name"],
-        st.session_state["email"]
-    )
-    # ... (以降のログイン成功後のUI表示コードはここに続く) ...
-
-elif st.session_state["authentication_status"] is False:
-    st.error('ユーザー名かパスワードが間違っています')
-
-elif st.session_state["authentication_status"] is None:
-    st.warning('ユーザー名とパスワードを入力してください')
-    # ... (以降のパスワード忘れなどのコードはここに続く) ...
 
 
 
@@ -241,8 +201,10 @@ def update_password_in_firestore(username, new_hashed_password):
         return False
 
 # --- メインアプリケーション ---
+# 設定取得
 config = fetch_config_from_firestore()
 
+# Authenticator作成
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
@@ -250,15 +212,36 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# Googleログインボタンを先に表示
-if "google" in config and st.session_state["authentication_status"] is None:
-    if authenticator.experimental_guest_login(provider="google", location='main'):
+# Googleログイン処理（公式の推奨は experimental_guest_login ではなく login + OAuth）
+if "google" in config and "oauth2" in config and st.session_state["authentication_status"] is None:
+    # 呼び出す際に oauth2 の設定を渡す
+    if authenticator.experimental_guest_login(provider="google", location='main', oauth2=config['oauth2']):
         st.rerun()
 
+# ... (188行目あたり)
+# ログインフォームを表示・処理します。この関数の戻り値は使いません。
 authenticator.login(
     location='main',
     fields={'Form name': 'ログイン', 'Username': 'ユーザー名', 'Password': 'パスワード', 'Login': 'ログイン'}
 )
+
+# 認証ステータスは st.session_state から取得します。
+if st.session_state["authentication_status"]:
+    # --- ログイン成功後の処理 ---
+    # Googleログイン経由の新規ユーザーをFirestoreに登録
+    add_or_update_user_in_firestore(
+        st.session_state["username"],
+        st.session_state["name"],
+        st.session_state["email"]
+    )
+    # ... (以降のログイン成功後のUI表示コードはここに続く) ...
+
+elif st.session_state["authentication_status"] is False:
+    st.error('ユーザー名かパスワードが間違っています')
+
+elif st.session_state["authentication_status"] is None:
+    st.warning('ユーザー名とパスワードを入力してください')
+    # ... (以降のパスワード忘れなどのコードはここに続く) ...
 
 if st.session_state["authentication_status"]:
     # --- ログイン成功後の処理 ---
