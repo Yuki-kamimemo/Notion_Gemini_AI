@@ -369,7 +369,10 @@ elif st.session_state["authentication_status"] is None:
         try:
             (username_of_forgotten_password,
              email_of_forgotten_password,
-             new_random_password) = authenticator.forgot_password(location='main')
+             new_random_password) = authenticator.forgot_password(
+                 location='main',
+                 fields={'Form name': 'パスワードリセット', 'Username': 'ユーザー名', 'Submit': '送信'}
+             )
 
             if username_of_forgotten_password:
                 st.success('新しい一時パスワードが生成されました。')
@@ -391,7 +394,10 @@ elif st.session_state["authentication_status"] is None:
     with st.expander("ユーザー名をお忘れですか？"):
         try:
             (username_of_forgotten_username,
-             email_of_forgotten_username) = authenticator.forgot_username(location='main')
+             email_of_forgotten_username) = authenticator.forgot_username(
+                 location='main',
+                 fields={'Form name': 'ユーザー名検索', 'Email': 'メールアドレス', 'Submit': '検索'}
+             )
             
             if username_of_forgotten_username:
                 st.success('あなたのユーザー名はこちらです:')
@@ -406,7 +412,14 @@ elif st.session_state["authentication_status"] is None:
         logging.info("ユーザー登録フォームの表示を開始します。")
         email, username, name = authenticator.register_user(
             location='main',
-            fields={'Form name': '新規ユーザー登録', 'Username': 'ユーザー名 (半角英数字のみ)', 'Email': 'メールアドレス', 'Name': '氏名', 'Password': 'パスワード', 'Repeat password': 'パスワードを再入力', 'Register': '登録する'}
+            fields={'Form name': '新規ユーザー登録',
+                     'Username': 'ユーザー名 (半角英数字のみ)', 
+                     'Email': 'メールアドレス', 
+                     'First name': '姓',
+                     'Last name': '名', 
+                     'Password': 'パスワード', 
+                     'Repeat password': 'パスワードを再入力', 
+                     'Register': '登録する'}
         )
         logging.info(f"register_userの戻り値: email={email}, username={username}, name={name}")
 
