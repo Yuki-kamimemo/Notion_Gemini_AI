@@ -102,7 +102,8 @@ def fetch_config_from_firestore():
     }
     
     if "oauth2" in st.secrets and "google" in st.secrets["oauth2"]:
-        config['oauth2'] = st.secrets["oauth2"]
+        config['oauth2'] = dict(st.secrets["oauth2"])
+
 
 
     logging.info("Successfully fetched and built config from Firestore.")
