@@ -326,36 +326,41 @@ elif st.session_state["authentication_status"] is None:
     st.warning('ユーザー名とパスワードを入力してください')
     
     try:
+        logging.info("ユーザー登録フォームの表示を開始します。")
         email, username, name = authenticator.register_user(
             location='main',
             fields={'Form name': '新規ユーザー登録', 'Username': 'ユーザー名 (半角英数字のみ)', 'Email': 'メールアドレス', 'Name': '氏名', 'Password': 'パスワード', 'Repeat password': 'パスワードを再入力', 'Register': '登録する'}
         )
-        
+        logging.info(f"register_userの戻り値: email={email}, username={username}, name={name}")
+
         if email:
-            # authenticatorが内部のconfigを更新するので、そこからハッシュ化済みパスワードを取得
-            # 注意：この方法では、configオブジェクトがメモリ上で更新されることを前提としています。
+            logging.info("ユーザー登録情報のFirestore保存処理を開始します。")
             updated_credentials = authenticator.credentials['usernames']
+            logging.debug(f"updated_credentials: {updated_credentials}")
             hashed_password = updated_credentials[username]['password']
-            
-            # 新規ユーザー情報をFirestoreに保存
+            logging.debug(f"hashed_password: {hashed_password}")
+
             user_ref = db.collection('users').document(username)
             user_ref.set({
                 'name': name,
                 'email': email,
                 'password': hashed_password
             })
+            logging.info(f"Firestoreにユーザー '{username}' を保存しました。")
             st.success('ユーザー登録が成功しました。再度ログインしてください。')
-            st.cache_data.clear() # ユーザーリストが変わったのでキャッシュをクリア
+            st.cache_data.clear()
+        else:
+            logging.info("emailがNoneまたは空のため、Firestore保存処理をスキップしました。")
 
     except stauth.utilities.exceptions.RegisterError as e:
         error_message = str(e)
+        logging.warning(f"RegisterError発生: {error_message}")
         if "Password must" in error_message:
             st.error("パスワードは以下の要件を満たす必要があります：\n- 8文字以上\n- 1つ以上の小文字を含む\n- 1つ以上の大文字を含む\n- 1つ以上の数字を含む\n- 1つ以上の特殊文字を含む (@$!%*?&)")
         else:
             st.error(e)
     except Exception as e:
-        # ★★★ ご指摘の箇所を修正・再追加 ★★★
-        # その他の予期せぬエラー
         logging.error("register_userウィジェットで予期せぬエラーが発生しました。")
-        logging.error(traceback.format_exc()) # 完全なトレースバックをログに出力
+        logging.error(traceback.format_exc())
         st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
+
