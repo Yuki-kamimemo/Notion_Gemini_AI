@@ -355,4 +355,8 @@ elif st.session_state["authentication_status"] is None:
         else:
             st.error(e)
     except Exception as e:
+        # ★★★ ご指摘の箇所を修正・再追加 ★★★
+        # その他の予期せぬエラー
+        logging.error("register_userウィジェットで予期せぬエラーが発生しました。")
+        logging.error(traceback.format_exc()) # 完全なトレースバックをログに出力
         st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
