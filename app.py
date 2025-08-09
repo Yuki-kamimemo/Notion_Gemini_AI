@@ -180,7 +180,7 @@ if st.session_state["authentication_status"]:
     # --- パスワードリセット機能の追加 ---
     with st.sidebar.expander("パスワードリセット"):
         try:
-            if authenticator.reset_password(st.session_state["username"], location='form'):
+            if authenticator.reset_password(st.session_state["username"], location='sidebar'):
                 st.success('パスワードが正常に変更されました。データベースを更新しています...')
                 # authenticatorによって更新されたメモリ上のconfigから新しいハッシュ値を取得
                 new_password_hash = config['credentials']['usernames'][st.session_state["username"]]['password']
