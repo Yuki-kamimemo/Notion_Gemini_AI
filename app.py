@@ -100,8 +100,35 @@ def fetch_config_from_firestore():
         },
         'preauthorized': {'emails': []}
     }
+    
+    # Google OAuthのクライアントIDをSecretsから読み込む
+    if "GOOGLE_CLIENT_ID" in st.secrets:
+        config['google'] = {
+            'client_id': st.secrets["GOOGLE_CLIENT_ID"]
+        }
+
     logging.info("Successfully fetched and built config from Firestore.")
     return config
+
+def add_or_update_user_in_firestore(username, name, email, password_hash=None):
+    """Firestoreに新規ユーザーを追加または既存ユーザーを更新する"""
+    try:
+        user_ref = db.collection('users').document(username)
+        user_data = {
+            'name': name,
+            'email': email
+        }
+        if password_hash:
+            user_data['password'] = password_hash
+        
+        # merge=Trueで既存のフィールドを上書きせずにドキュメントを作成・更新
+        user_ref.set(user_data, merge=True)
+        logging.info(f"User '{username}' data saved/updated in Firestore.")
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        logging.error(f"Failed to save/update user {username} in Firestore: {e}")
+        return False
 
 def save_api_keys_to_firestore(username, notion_key, gemini_key):
     """ユーザーのAPIキーを暗号化してFirestoreに保存"""
@@ -154,6 +181,11 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
+# Googleログインボタンを先に表示
+if "google" in config and st.session_state["authentication_status"] is None:
+    if authenticator.experimental_guest_login(provider="Google", location='main', key='google_login'):
+        st.rerun()
+
 authenticator.login(
     location='main',
     fields={'Form name': 'ログイン', 'Username': 'ユーザー名', 'Password': 'パスワード', 'Login': 'ログイン'}
@@ -161,6 +193,13 @@ authenticator.login(
 
 if st.session_state["authentication_status"]:
     # --- ログイン成功後の処理 ---
+    # Googleログイン経由の新規ユーザーをFirestoreに登録
+    add_or_update_user_in_firestore(
+        st.session_state["username"],
+        st.session_state["name"],
+        st.session_state["email"]
+    )
+
     st.sidebar.title(f'ようこそ, *{st.session_state["name"]}* さん')
     authenticator.logout('ログアウト', 'sidebar')
 
@@ -412,14 +451,7 @@ elif st.session_state["authentication_status"] is None:
         logging.info("ユーザー登録フォームの表示を開始します。")
         email, username, name = authenticator.register_user(
             location='main',
-            fields={'Form name': '新規ユーザー登録',
-                     'Username': 'ユーザー名 (半角英数字のみ)', 
-                     'Email': 'メールアドレス', 
-                     'First name': '姓',
-                     'Last name': '名', 
-                     'Password': 'パスワード', 
-                     'Repeat password': 'パスワードを再入力', 
-                     'Register': '登録する'}
+            fields={'Form name': '新規ユーザー登録', 'Username': 'ユーザー名 (半角英数字のみ)', 'Email': 'メールアドレス', 'Name': '氏名', 'Password': 'パスワード', 'Repeat password': 'パスワードを再入力', 'Register': '登録する'}
         )
         logging.info(f"register_userの戻り値: email={email}, username={username}, name={name}")
 
@@ -430,17 +462,8 @@ elif st.session_state["authentication_status"] is None:
                 # register_user 実行後に渡した config が更新されているはずなので直接参照
                 if username in config['credentials']['usernames']:
                     hashed_password = config['credentials']['usernames'][username]['password']
-                    logging.debug(f"取得したhashed_password: {hashed_password}")
-
-                    user_ref = db.collection('users').document(username)
-                    user_ref.set({
-                        'name': name,
-                        'email': email,
-                        'password': hashed_password
-                    })
-                    logging.info(f"Firestoreにユーザー '{username}' を保存しました。")
+                    add_or_update_user_in_firestore(username, name, email, hashed_password)
                     st.success('ユーザー登録が成功しました。再度ログインしてください。')
-                    st.cache_data.clear()
                 else:
                     logging.error(f"ユーザー '{username}' のパスワード情報がconfigに見つかりません。")
                     st.error("登録情報の取得に失敗しました。もう一度お試しください。")
