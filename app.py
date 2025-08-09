@@ -34,7 +34,6 @@ def initialize_firestore():
         # Streamlit Secretsから認証情報を辞書として取得
         secrets_dict = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
         
-        # ★★★ ご指摘の箇所を修正・再追加 ★★★
         # Firebaseが必要とするキーだけを安全に抽出して新しい辞書を作成
         required_keys = [
             "type", "project_id", "private_key_id", "private_key",
