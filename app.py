@@ -180,15 +180,28 @@ if st.session_state["authentication_status"]:
     # --- パスワードリセット機能の追加 ---
     with st.sidebar.expander("パスワードリセット"):
         try:
-            if authenticator.reset_password(st.session_state["username"], location='sidebar'):
-                st.success('パスワードが正常に変更されました。データベースを更新しています...')
-                # authenticatorによって更新されたメモリ上のconfigから新しいハッシュ値を取得
-                new_password_hash = config['credentials']['usernames'][st.session_state["username"]]['password']
-                # Firestoreのパスワードを更新
-                if update_password_in_firestore(st.session_state["username"], new_password_hash):
-                    st.success('データベースのパスワードが更新されました。')
-                else:
-                    st.error('データベースのパスワード更新に失敗しました。')
+            with st.form(key='reset_pw_form', clear_on_submit=True):
+                st.write("現在のパスワードと新しいパスワードを入力してください。")
+                current_password = st.text_input("現在のパスワード", type="password")
+                new_password = st.text_input("新しいパスワード", type="password")
+                new_password_repeat = st.text_input("新しいパスワード（確認）", type="password")
+                
+                if st.form_submit_button("パスワードをリセット"):
+                    # Use the controller to avoid UI rendering issues
+                    if authenticator.authentication_controller.reset_password(
+                        st.session_state["username"],
+                        current_password,
+                        new_password,
+                        new_password_repeat
+                    ):
+                        st.success('パスワードが正常に変更されました。データベースを更新しています...')
+                        # The config dict in memory is updated by the authenticator
+                        new_password_hash = config['credentials']['usernames'][st.session_state["username"]]['password']
+                        # Update the password in Firestore
+                        if update_password_in_firestore(st.session_state["username"], new_password_hash):
+                            st.success('データベースのパスワードが更新されました。')
+                        else:
+                            st.error('データベースのパスワード更新に失敗しました。')
         except Exception as e:
             st.error(e)
     # --- ここまでが追加機能 ---
