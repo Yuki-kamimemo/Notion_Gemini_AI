@@ -335,20 +335,27 @@ elif st.session_state["authentication_status"] is None:
 
         if email:
             logging.info("ユーザー登録情報のFirestore保存処理を開始します。")
-            updated_credentials = authenticator.credentials['usernames']
-            logging.debug(f"updated_credentials: {updated_credentials}")
-            hashed_password = updated_credentials[username]['password']
-            logging.debug(f"hashed_password: {hashed_password}")
 
-            user_ref = db.collection('users').document(username)
-            user_ref.set({
-                'name': name,
-                'email': email,
-                'password': hashed_password
-            })
-            logging.info(f"Firestoreにユーザー '{username}' を保存しました。")
-            st.success('ユーザー登録が成功しました。再度ログインしてください。')
-            st.cache_data.clear()
+            # Firestoreに直接新規ユーザーを登録
+            # パスワードは register_user 内でハッシュ化済みのものが config に保存されているので、
+            # 再度 fetch_config_from_firestore で取得して利用する
+            current_config = fetch_config_from_firestore()
+            if username in current_config['credentials']['usernames']:
+                hashed_password = current_config['credentials']['usernames'][username]['password']
+                logging.debug(f"取得したhashed_password: {hashed_password}")
+
+                user_ref = db.collection('users').document(username)
+                user_ref.set({
+                    'name': name,
+                    'email': email,
+                    'password': hashed_password
+                })
+                logging.info(f"Firestoreにユーザー '{username}' を保存しました。")
+                st.success('ユーザー登録が成功しました。再度ログインしてください。')
+                st.cache_data.clear()
+            else:
+                logging.error(f"ユーザー '{username}' のパスワード情報がconfigに見つかりません。")
+
         else:
             logging.info("emailがNoneまたは空のため、Firestore保存処理をスキップしました。")
 
@@ -357,10 +364,11 @@ elif st.session_state["authentication_status"] is None:
         logging.warning(f"RegisterError発生: {error_message}")
         if "Password must" in error_message:
             st.error("パスワードは以下の要件を満たす必要があります：\n- 8文字以上\n- 1つ以上の小文字を含む\n- 1つ以上の大文字を含む\n- 1つ以上の数字を含む\n- 1つ以上の特殊文字を含む (@$!%*?&)")
+        elif "Captcha" in error_message:
+            st.error("CAPTCHAの入力が間違っています。再度お試しください。")
         else:
             st.error(e)
     except Exception as e:
         logging.error("register_userウィジェットで予期せぬエラーが発生しました。")
         logging.error(traceback.format_exc())
         st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
-
