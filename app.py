@@ -115,10 +115,22 @@ def fetch_config_from_firestore():
     return config
 
 
-# --- Googleログインボタンを先に表示 ---
+# 1. Firestoreからconfigを取得
+config = fetch_config_from_firestore()
+
+# 2. 認証クラス作成
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days']
+)
+
+# 3. Googleログインボタンを先に表示
 if "google" in config and st.session_state.get("authentication_status") is None:
     if authenticator.experimental_guest_login(provider="google", location='main'):
         st.rerun()
+
 
 
 
