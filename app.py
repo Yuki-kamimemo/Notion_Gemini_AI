@@ -77,25 +77,14 @@ except KeyError:
     st.stop()
 
 
+
+
+# Firestoreなどからユーザー情報を読み込む関数
 @st.cache_data(ttl=600)
 def fetch_config_from_firestore():
-    """Firestoreからユーザー情報を取得し、authenticator用のconfigを生成（Google OAuth対応・再帰防止版）"""
-    logging.info("Fetching user credentials from Firestore...")
-
-    # Firestoreからユーザー情報を取得
-    users_ref = db.collection('users').stream()
-    credentials_data = {'usernames': {}}
-    for user_doc in users_ref:
-        user_data = user_doc.to_dict()
-        credentials_data['usernames'][user_doc.id] = {
-            'email': user_data.get('email'),
-            'name': user_data.get('name'),
-            'password': user_data.get('password')
-        }
-
-    # 基本設定
+    # ... Firestoreからcredentials取得 ...
     config = {
-        'credentials': credentials_data,
+        'credentials': {...},
         'cookie': {
             'expiry_days': 30,
             'key': st.secrets["ENCRYPTION_SECRET"],
@@ -104,21 +93,18 @@ def fetch_config_from_firestore():
         'preauthorized': {'emails': []}
     }
 
-    # Google OAuth 設定を追加（循環参照防止のためdict()でコピー）
+    # Google OAuth設定を追加
     if "oauth2" in st.secrets and "google" in st.secrets["oauth2"]:
         google_config = dict(st.secrets["oauth2"]["google"])
         config['oauth2'] = {'google': google_config}
-        config['google'] = google_config  # 既存条件 `"google" in config` に対応
-        logging.info("Google OAuth configuration loaded into config.")
-
-    logging.info("Successfully fetched and built config from Firestore.")
+        config['google'] = google_config  # 互換性用
     return config
 
 
-# 1. Firestoreからconfigを取得
+# 設定取得
 config = fetch_config_from_firestore()
 
-# 2. 認証クラス作成
+# Authenticator作成
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
@@ -126,10 +112,19 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# 3. Googleログインボタンを先に表示
+# Googleログイン処理（公式の推奨は experimental_guest_login ではなく login + OAuth）
 if "google" in config and st.session_state.get("authentication_status") is None:
-    if authenticator.experimental_guest_login(provider="google", location='main'):
+    if authenticator.experimental_guest_login(provider="google", location="main"):
         st.rerun()
+
+# 通常ログイン
+name, authentication_status, username = authenticator.login(location='main')
+
+if authentication_status:
+    st.success(f"ようこそ {name} さん")
+elif authentication_status is False:
+    st.error("ユーザー名かパスワードが間違っています")
+
 
 
 
