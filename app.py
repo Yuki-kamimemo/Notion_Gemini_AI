@@ -91,17 +91,24 @@ def fetch_config_from_firestore():
         usernames_dict = {}
         for doc in users_docs:
             user_data = doc.to_dict()
-            username = doc.id  # ドキュメントIDをユーザー名として使用
-            usernames_dict[username] = {
+            username = doc.id
+
+            # 基本的なユーザー情報を作成
+            user_entry = {
                 'email': user_data.get('email'),
                 'name': user_data.get('name'),
-                'password': user_data.get('password'),
-                # logged_inとfailed_login_attemptsはライブラリが自動管理するため、
-                # Firestoreに保存されていなくても問題ありません。
+                # これらはライブラリが実行時に管理
                 'logged_in': False,
                 'failed_login_attempts': 0
             }
 
+            # passwordフィールドがFirestoreに存在する場合のみ、辞書に追加する
+            if 'password' in user_data and user_data['password'] is not None:
+                user_entry['password'] = user_data['password']
+
+            usernames_dict[username] = user_entry
+
+        # --- 以下、変更なし ---
         config = {
             'credentials': {
                 'usernames': usernames_dict
@@ -112,15 +119,13 @@ def fetch_config_from_firestore():
                 'name': 'notion_ai_cookie'
             },
             'preauthorized': {
-                'emails': [] # 必要であればFirestoreから取得するロジックを追加
+                'emails': []
             }
         }
 
-        # Streamlit SecretsからGoogle OAuthの設定を読み込む
         if "oauth2" in st.secrets and "google" in st.secrets["oauth2"]:
             google_config = dict(st.secrets["oauth2"]["google"])
             config['oauth2'] = {'google': google_config}
-            # READMEに記載のあった古い形式にも対応
             config['google'] = google_config
 
         logging.info("Successfully fetched and formatted config from Firestore.")
@@ -130,13 +135,7 @@ def fetch_config_from_firestore():
         logging.error(f"Failed to fetch config from Firestore: {e}")
         st.error("Firestoreからの設定読み込み中にエラーが発生しました。")
         st.exception(e)
-        return None # エラー発生時はNoneを返す
-
-
-
-
-
-
+        return None
 
 
 def add_or_update_user_in_firestore(username, name, email, password_hash=None):
