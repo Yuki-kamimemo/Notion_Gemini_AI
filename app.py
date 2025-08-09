@@ -329,7 +329,14 @@ elif st.session_state["authentication_status"] is None:
     try:
         email, username, name = authenticator.register_user(
             location='main',
-            fields={'Form name': '新規ユーザー登録', 'Username': 'ユーザー名 (半角英数字のみ)', 'Email': 'メールアドレス', 'Name': '氏名', 'Password': 'パスワード', 'Repeat password': 'パスワードを再入力', 'Register': '登録する'}
+            fields={'Form name': '新規ユーザー登録',
+                     'Username': 'ユーザー名 (半角英数字のみ)', 
+                     'Email': 'メールアドレス', 
+                     'First name': '姓',
+                     'Last name': '名', 
+                     'Password': 'パスワード', 
+                     'Repeat password': 'パスワードを再入力', 
+                     'Register': '登録する'}
         )
         
         if email:
