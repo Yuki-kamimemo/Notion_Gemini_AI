@@ -355,6 +355,32 @@ elif st.session_state["authentication_status"] is False:
 elif st.session_state["authentication_status"] is None:
     st.warning('ユーザー名とパスワードを入力してください')
     
+    # --- パスワード忘れ対応機能の追加 ---
+    with st.expander("パスワードをお忘れですか？"):
+        try:
+            (username_of_forgotten_password,
+             email_of_forgotten_password,
+             new_random_password) = authenticator.forgot_password(location='form')
+
+            if username_of_forgotten_password:
+                st.success('新しい一時パスワードが生成されました。')
+                st.warning('**重要:** このパスワードを安全な場所にコピーし、ログイン後に必ずパスワードをリセットしてください。')
+                st.code(new_random_password)
+                
+                # authenticatorによって更新されたメモリ上のconfigから新しいハッシュ値を取得
+                new_password_hash = config['credentials']['usernames'][username_of_forgotten_password]['password']
+                # Firestoreのパスワードを更新
+                if update_password_in_firestore(username_of_forgotten_password, new_password_hash):
+                    st.info('データベースのパスワードが更新されました。')
+                else:
+                    st.error('データベースのパスワード更新に失敗しました。')
+
+            elif username_of_forgotten_password == False:
+                st.error('ユーザー名が見つかりませんでした。')
+        except Exception as e:
+            st.error(e)
+    # --- ここまでが追加機能 ---
+
     try:
         logging.info("ユーザー登録フォームの表示を開始します。")
         email, username, name = authenticator.register_user(
