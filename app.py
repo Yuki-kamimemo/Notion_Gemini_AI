@@ -7,8 +7,10 @@ import streamlit_authenticator as stauth
 from cryptography.fernet import Fernet
 import logging
 import traceback
-from google.oauth2 import service_account
-from google.cloud import firestore
+# ★★★ Firebase Admin SDKの公式なインポート ★★★
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
 import hashlib
 import base64
 
@@ -24,22 +26,28 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- Streamlit UI設定 ---
 st.set_page_config(page_title="Notion記事自動生成AI", layout="wide")
 
-# --- Firestore 初期化 ---
+# --- Firestore 初期化 (Firebase Admin SDKを使用) ---
 @st.cache_resource
 def initialize_firestore():
-    """Firestoreクライアントを初期化する"""
+    """Firebase Admin SDKを初期化し、Firestoreクライアントを返す"""
     try:
+        # Streamlit Secretsから認証情報を辞書として取得
         creds_json = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
-        creds = service_account.Credentials.from_service_account_info(creds_json)
-        db = firestore.Client(credentials=creds)
-        logging.info("Firestore client initialized successfully.")
+        # 辞書から認証情報オブジェクトを生成
+        cred = credentials.Certificate(creds_json)
+        
+        # アプリがまだ初期化されていない場合のみ初期化する
+        # (Streamlitの再実行時にエラーを防ぐため)
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
+            
+        db = firestore.client()
+        logging.info("Firestore client initialized successfully via Firebase Admin SDK.")
         return db
     except Exception as e:
-        # ★★★ 修正箇所 ★★★
-        # エラーの原因を特定するため、詳細なエラー情報を画面に表示する
         logging.error(f"Firestore initialization failed: {e}")
-        st.error("データベースへの接続中にエラーが発生しました。")
-        st.exception(e) # 詳細なエラー情報を表示
+        st.error("データベースへの接続中にエラーが発生しました。SecretsやFirebaseのAPI設定を確認してください。")
+        st.exception(e) # 詳細なエラー情報を画面に表示
         st.stop()
 
 db = initialize_firestore()
@@ -65,17 +73,17 @@ def fetch_config_from_firestore():
     """Firestoreからユーザー情報を取得し、authenticator用のconfigを生成"""
     logging.info("Fetching user credentials from Firestore...")
     users_ref = db.collection('users').stream()
-    credentials = {'usernames': {}}
+    credentials_data = {'usernames': {}}
     for user_doc in users_ref:
         user_data = user_doc.to_dict()
-        credentials['usernames'][user_doc.id] = {
+        credentials_data['usernames'][user_doc.id] = {
             'email': user_data.get('email'),
             'name': user_data.get('name'),
             'password': user_data.get('password')
         }
     
     config = {
-        'credentials': credentials,
+        'credentials': credentials_data,
         'cookie': {
             'expiry_days': 30,
             'key': st.secrets["ENCRYPTION_SECRET"],
@@ -316,7 +324,10 @@ elif st.session_state["authentication_status"] is None:
         
         if email:
             # authenticatorが内部のconfigを更新するので、そこからハッシュ化済みパスワードを取得
-            hashed_password = config['credentials']['usernames'][username]['password']
+            # 注意：この方法では、configオブジェクトがメモリ上で更新されることを前提としています。
+            updated_credentials = authenticator.credentials['usernames']
+            hashed_password = updated_credentials[username]['password']
+            
             # 新規ユーザー情報をFirestoreに保存
             user_ref = db.collection('users').document(username)
             user_ref.set({
