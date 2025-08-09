@@ -79,26 +79,58 @@ except KeyError:
 
 
 
-# Firestoreなどからユーザー情報を読み込む関数
+# app.py の fetch_config_from_firestore 関数を以下に置き換えてください
+
 @st.cache_data(ttl=600)
 def fetch_config_from_firestore():
-    # ... Firestoreからcredentials取得 ...
-    config = {
-        'credentials': {...},
-        'cookie': {
-            'expiry_days': 30,
-            'key': st.secrets["ENCRYPTION_SECRET"],
-            'name': 'notion_ai_cookie'
-        },
-        'preauthorized': {'emails': []}
-    }
+    """Firestoreからユーザー設定を読み込み、authenticatorが要求する形式に変換する"""
+    try:
+        users_ref = db.collection('users')
+        users_docs = users_ref.stream()
 
-    # Google OAuth設定を追加
-    if "oauth2" in st.secrets and "google" in st.secrets["oauth2"]:
-        google_config = dict(st.secrets["oauth2"]["google"])
-        config['oauth2'] = {'google': google_config}
-        config['google'] = google_config  # 互換性用
-    return config
+        usernames_dict = {}
+        for doc in users_docs:
+            user_data = doc.to_dict()
+            username = doc.id  # ドキュメントIDをユーザー名として使用
+            usernames_dict[username] = {
+                'email': user_data.get('email'),
+                'name': user_data.get('name'),
+                'password': user_data.get('password'),
+                # logged_inとfailed_login_attemptsはライブラリが自動管理するため、
+                # Firestoreに保存されていなくても問題ありません。
+                'logged_in': False,
+                'failed_login_attempts': 0
+            }
+
+        config = {
+            'credentials': {
+                'usernames': usernames_dict
+            },
+            'cookie': {
+                'expiry_days': 30,
+                'key': st.secrets["ENCRYPTION_SECRET"],
+                'name': 'notion_ai_cookie'
+            },
+            'preauthorized': {
+                'emails': [] # 必要であればFirestoreから取得するロジックを追加
+            }
+        }
+
+        # Streamlit SecretsからGoogle OAuthの設定を読み込む
+        if "oauth2" in st.secrets and "google" in st.secrets["oauth2"]:
+            google_config = dict(st.secrets["oauth2"]["google"])
+            config['oauth2'] = {'google': google_config}
+            # READMEに記載のあった古い形式にも対応
+            config['google'] = google_config
+
+        logging.info("Successfully fetched and formatted config from Firestore.")
+        return config
+
+    except Exception as e:
+        logging.error(f"Failed to fetch config from Firestore: {e}")
+        st.error("Firestoreからの設定読み込み中にエラーが発生しました。")
+        st.exception(e)
+        return None # エラー発生時はNoneを返す
 
 
 # 設定取得
