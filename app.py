@@ -130,6 +130,20 @@ def load_api_keys_from_firestore(username):
             return None
     return None
 
+def update_password_in_firestore(username, new_hashed_password):
+    """Firestoreのユーザーパスワードを更新する"""
+    try:
+        user_ref = db.collection('users').document(username)
+        user_ref.update({
+            'password': new_hashed_password
+        })
+        logging.info(f"Password updated successfully in Firestore for user: {username}")
+        st.cache_data.clear() # Clear cache to force re-fetch of config
+        return True
+    except Exception as e:
+        logging.error(f"Failed to update password in Firestore for user {username}: {e}")
+        return False
+
 # --- メインアプリケーション ---
 config = fetch_config_from_firestore()
 
@@ -162,6 +176,22 @@ if st.session_state["authentication_status"]:
                     st.success("APIキーを保存しました！")
                 else:
                     st.warning("両方のAPIキーを入力してください。")
+
+    # --- パスワードリセット機能の追加 ---
+    with st.sidebar.expander("パスワードリセット"):
+        try:
+            if authenticator.reset_password(st.session_state["username"], location='form'):
+                st.success('パスワードが正常に変更されました。データベースを更新しています...')
+                # authenticatorによって更新されたメモリ上のconfigから新しいハッシュ値を取得
+                new_password_hash = config['credentials']['usernames'][st.session_state["username"]]['password']
+                # Firestoreのパスワードを更新
+                if update_password_in_firestore(st.session_state["username"], new_password_hash):
+                    st.success('データベースのパスワードが更新されました。')
+                else:
+                    st.error('データベースのパスワード更新に失敗しました。')
+        except Exception as e:
+            st.error(e)
+    # --- ここまでが追加機能 ---
 
     user_api_keys = load_api_keys_from_firestore(st.session_state["username"])
 
