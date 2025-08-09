@@ -32,7 +32,17 @@ def initialize_firestore():
     """Firebase Admin SDKを初期化し、Firestoreクライアントを返す"""
     try:
         # Streamlit Secretsから認証情報を辞書として取得
-        creds_json = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
+        secrets_dict = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
+        
+        # ★★★ 修正箇所 ★★★
+        # Firebaseが必要とするキーだけを抽出して新しい辞書を作成
+        required_keys = [
+            "type", "project_id", "private_key_id", "private_key",
+            "client_email", "client_id", "auth_uri", "token_uri",
+            "auth_provider_x509_cert_url", "client_x509_cert_url"
+        ]
+        creds_json = {key: secrets_dict[key] for key in required_keys if key in secrets_dict}
+
         # 辞書から認証情報オブジェクトを生成
         cred = credentials.Certificate(creds_json)
         
