@@ -183,7 +183,7 @@ authenticator = stauth.Authenticate(
 
 # Googleログインボタンを先に表示
 if "google" in config and st.session_state["authentication_status"] is None:
-    if authenticator.experimental_guest_login(provider="Google", location='main', key='google_login'):
+    if authenticator.experimental_guest_login(provider="Google", location='main'):
         st.rerun()
 
 authenticator.login(
