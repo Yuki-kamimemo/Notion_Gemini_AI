@@ -79,7 +79,7 @@ except KeyError:
 
 @st.cache_data(ttl=600)
 def fetch_config_from_firestore():
-    """Firestoreからユーザー情報を取得し、authenticator用のconfigを生成（Google OAuth対応版）"""
+    """Firestoreからユーザー情報を取得し、authenticator用のconfigを生成（Google OAuth対応・再帰防止版）"""
     logging.info("Fetching user credentials from Firestore...")
 
     # Firestoreからユーザー情報を取得
@@ -106,13 +106,20 @@ def fetch_config_from_firestore():
 
     # Google OAuth 設定を追加（循環参照防止のためdict()でコピー）
     if "oauth2" in st.secrets and "google" in st.secrets["oauth2"]:
-        config['oauth2'] = {
-            'google': dict(st.secrets["oauth2"]["google"])
-        }
+        google_config = dict(st.secrets["oauth2"]["google"])
+        config['oauth2'] = {'google': google_config}
+        config['google'] = google_config  # 既存条件 `"google" in config` に対応
         logging.info("Google OAuth configuration loaded into config.")
 
     logging.info("Successfully fetched and built config from Firestore.")
     return config
+
+
+# --- Googleログインボタンを先に表示 ---
+if "google" in config and st.session_state.get("authentication_status") is None:
+    if authenticator.experimental_guest_login(provider="google", location='main'):
+        st.rerun()
+
 
 
 def add_or_update_user_in_firestore(username, name, email, password_hash=None):
