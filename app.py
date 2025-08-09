@@ -145,8 +145,9 @@ authenticator = stauth.Authenticate(
 )
 
 # Googleログイン処理（公式の推奨は experimental_guest_login ではなく login + OAuth）
-if "google" in config and st.session_state.get("authentication_status") is None:
-    if authenticator.experimental_guest_login(provider="google", location="main"):
+if "google" in config and "oauth2" in config and st.session_state["authentication_status"] is None:
+    # 呼び出す際に oauth2 の設定を渡す
+    if authenticator.experimental_guest_login(provider="google", location='main', oauth2=config['oauth2']):
         st.rerun()
 
 # 通常ログイン
