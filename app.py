@@ -7,7 +7,7 @@ import streamlit_authenticator as stauth
 from cryptography.fernet import Fernet
 import logging
 import traceback
-# ★★★ Firebase Admin SDKの公式なインポート ★★★
+# Firebase Admin SDKの公式なインポート
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
@@ -32,22 +32,12 @@ def initialize_firestore():
     """Firebase Admin SDKを初期化し、Firestoreクライアントを返す"""
     try:
         # Streamlit Secretsから認証情報を辞書として取得
-        secrets_dict = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
+        creds_json = st.secrets["FIREBASE_SERVICE_ACCOUNT"]
         
-        # ★★★ 修正箇所 ★★★
-        # Firebaseが必要とするキーだけを抽出して新しい辞書を作成
-        required_keys = [
-            "type", "project_id", "private_key_id", "private_key",
-            "client_email", "client_id", "auth_uri", "token_uri",
-            "auth_provider_x509_cert_url", "client_x509_cert_url"
-        ]
-        creds_json = {key: secrets_dict[key] for key in required_keys if key in secrets_dict}
-
         # 辞書から認証情報オブジェクトを生成
         cred = credentials.Certificate(creds_json)
         
         # アプリがまだ初期化されていない場合のみ初期化する
-        # (Streamlitの再実行時にエラーを防ぐため)
         if not firebase_admin._apps:
             firebase_admin.initialize_app(cred)
             
@@ -178,8 +168,8 @@ if st.session_state["authentication_status"]:
         if st.session_state.get('current_user') != st.session_state["username"] or 'clients_initialized' not in st.session_state:
             st.session_state.notion_client = notion_client.Client(auth=user_api_keys['notion'])
             genai.configure(api_key=user_api_keys['gemini'])
-            GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-            GEMINI_LITE_MODEL_NAME = os.getenv("GEMINI_LITE_MODEL", "gemini-2.5-flash-lite")
+            GEMINI_MODEL_NAME = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
+            GEMINI_LITE_MODEL_NAME = st.secrets.get("GEMINI_LITE_MODEL", "gemini-2.5-flash-lite")
             st.session_state.gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
             st.session_state.gemini_lite_model = genai.GenerativeModel(GEMINI_LITE_MODEL_NAME)
             st.session_state.notion_client.users.me()
@@ -340,20 +330,28 @@ elif st.session_state["authentication_status"] is None:
         )
         
         if email:
+            logging.info(f"Registration form submitted for email: {email}")
             # authenticatorが内部のconfigを更新するので、そこからハッシュ化済みパスワードを取得
-            # 注意：この方法では、configオブジェクトがメモリ上で更新されることを前提としています。
             updated_credentials = authenticator.credentials['usernames']
             hashed_password = updated_credentials[username]['password']
             
-            # 新規ユーザー情報をFirestoreに保存
-            user_ref = db.collection('users').document(username)
-            user_ref.set({
-                'name': name,
-                'email': email,
-                'password': hashed_password
-            })
-            st.success('ユーザー登録が成功しました。再度ログインしてください。')
-            st.cache_data.clear() # ユーザーリストが変わったのでキャッシュをクリア
+            # ★★★ 修正箇所 ★★★
+            # Firestoreへの書き込み処理を個別のtry-exceptで囲む
+            try:
+                logging.info(f"Attempting to write new user to Firestore: {username}")
+                user_ref = db.collection('users').document(username)
+                user_ref.set({
+                    'name': name,
+                    'email': email,
+                    'password': hashed_password
+                })
+                logging.info(f"Successfully wrote new user to Firestore: {username}")
+                st.success('ユーザー登録が成功しました。再度ログインしてください。')
+                st.cache_data.clear() # ユーザーリストが変わったのでキャッシュをクリア
+            except Exception as e_firestore:
+                logging.error(f"Firestore write operation failed: {e_firestore}")
+                st.error("データベースへのユーザー情報書き込みに失敗しました。")
+                st.exception(e_firestore) # Firestoreのエラー詳細を画面に表示
 
     except stauth.utilities.exceptions.RegisterError as e:
         error_message = str(e)
@@ -362,4 +360,8 @@ elif st.session_state["authentication_status"] is None:
         else:
             st.error(e)
     except Exception as e:
-        st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
+        # ★★★ 修正箇所 ★★★
+        # 予期せぬエラーの場合、その内容を直接表示する
+        logging.error(f"An unexpected error occurred in the registration widget: {e}")
+        st.error("ユーザー登録フォームで予期せぬエラーが発生しました。")
+        st.exception(e) # 詳細なエラー情報を画面に表示
