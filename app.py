@@ -101,11 +101,9 @@ def fetch_config_from_firestore():
         'preauthorized': {'emails': []}
     }
     
-    # Google OAuthのクライアントIDをSecretsから読み込む
-    if "GOOGLE_CLIENT_ID" in st.secrets:
-        config['google'] = {
-            'client_id': st.secrets["GOOGLE_CLIENT_ID"]
-        }
+    if "oauth2" in st.secrets and "google" in st.secrets["oauth2"]:
+        config['oauth2'] = st.secrets["oauth2"]
+
 
     logging.info("Successfully fetched and built config from Firestore.")
     return config
