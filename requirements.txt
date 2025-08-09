@@ -12,3 +12,4 @@ bcrypt
 PyYAML
 cryptography
 google-cloud-firestore
+firebase-admin
