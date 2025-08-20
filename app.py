@@ -274,11 +274,81 @@ if st.session_state["authentication_status"]:
 
 elif st.session_state["authentication_status"] is False:
     st.error('ユーザー名かパスワードが間違っています')
+
 elif st.session_state["authentication_status"] is None:
     st.warning('ユーザー名とパスワードを入力してください')
-    if st.button("新規登録"):
+    
+    with st.expander("パスワードをお忘れですか？"):
         try:
-            if authenticator.register_user('新規登録', preauthorization=False):
-                st.success('ユーザー登録が成功しました。')
+            (username_of_forgotten_password,
+             email_of_forgotten_password,
+             new_random_password) = authenticator.forgot_password(
+                 location='main',
+                 fields={'Form name': 'パスワードリセット', 'Username': 'ユーザー名', 'Submit': '送信'}
+             )
+
+            if username_of_forgotten_password:
+                st.success('新しい一時パスワードが生成されました。')
+                st.warning('**重要:** このパスワードを安全な場所にコピーし、ログイン後に必ずパスワードをリセットしてください。')
+                st.code(new_random_password)
+                
+                new_password_hash = config['credentials']['usernames'][username_of_forgotten_password]['password']
+                if update_password_in_firestore(username_of_forgotten_password, new_password_hash):
+                    st.info('データベースのパスワードが更新されました。')
+                else:
+                    st.error('データベースのパスワード更新に失敗しました。')
+
+            elif username_of_forgotten_password == False:
+                st.error('ユーザー名が見つかりませんでした。')
         except Exception as e:
             st.error(e)
+            
+    with st.expander("ユーザー名をお忘れですか？"):
+        try:
+            (username_of_forgotten_username,
+             email_of_forgotten_username) = authenticator.forgot_username(
+                 location='main',
+                 fields={'Form name': 'ユーザー名検索', 'Email': 'メールアドレス', 'Submit': '検索'}
+             )
+            
+            if username_of_forgotten_username:
+                st.success('あなたのユーザー名はこちらです:')
+                st.info(username_of_forgotten_username)
+            elif username_of_forgotten_username == False:
+                st.error('入力されたメールアドレスに紐づくユーザーが見つかりませんでした。')
+        except Exception as e:
+            st.error(e)
+
+    # ★★★ ここからが修正箇所 ★★★
+    try:
+        email, username, name = authenticator.register_user(
+            location='main',
+            fields={'Form name': '新規ユーザー登録', 'Username': 'ユーザー名 (半角英数字のみ)', 'Email': 'メールアドレス', 'Name': '氏名', 'Password': 'パスワード', 'Repeat password': 'パスワードを再入力', 'Register': '登録する'}
+        )
+
+        if email:
+            logging.info("ユーザー登録情報のFirestore保存処理を開始します。")
+            try:
+                if username in config['credentials']['usernames']:
+                    hashed_password = config['credentials']['usernames'][username]['password']
+                    add_or_update_user_in_firestore(username, name, email, hashed_password)
+                    st.success('ユーザー登録が成功しました。再度ログインしてください。')
+                else:
+                    logging.error(f"ユーザー '{username}' のパスワード情報がconfigに見つかりません。")
+                    st.error("登録情報の取得に失敗しました。もう一度お試しください。")
+            except Exception as e:
+                logging.error(f"Firestore保存処理でエラーが発生しました: {traceback.format_exc()}")
+                st.error("Firestoreへのユーザー登録中にエラーが発生しました。")
+
+    except stauth.utilities.exceptions.RegisterError as e:
+        error_message = str(e)
+        logging.warning(f"RegisterError発生: {error_message}")
+        # パスワードポリシーに関するエラーメッセージを親切に表示
+        if "Password must" in error_message:
+            st.error("パスワードは以下の要件を満たす必要があります：\n- 8文字以上\n- 1つ以上の小文字を含む\n- 1つ以上の大文字を含む\n- 1つ以上の数字を含む\n- 1つ以上の特殊文字を含む (@$!%*?&)")
+        else:
+            st.error(e)
+    except Exception as e:
+        logging.error(f"register_userウィジェットで予期せぬエラーが発生しました: {traceback.format_exc()}")
+        st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
+    # ★★★ ここまでが修正箇所 ★★★
