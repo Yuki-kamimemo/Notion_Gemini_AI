@@ -200,7 +200,6 @@ if config:
 
 if st.session_state["authentication_status"]:
     # --- ログイン成功後のメインUI ---
-    # Googleログイン経由の新規ユーザーをFirestoreに登録
     add_or_update_user_in_firestore(
         st.session_state["username"],
         st.session_state["name"],
@@ -304,8 +303,11 @@ if st.session_state["authentication_status"]:
         with st.form("new_page_form"):
             st.markdown("##### 1. AIの役割（ペルソナ）を選択")
             selected_persona_key = st.selectbox("AIのペルソナ:", options=persona_options.keys(), label_visibility="collapsed")
-            ai_persona = st.text_input("AIの具体的な役割を入力:", value=persona_options.get(selected_persona_key, ""), placeholder="カスタム選択時、または直接入力") if selected_persona_key == "カスタム" else persona_options[selected_persona_key]
-            
+            if selected_persona_key == "カスタム":
+                ai_persona = st.text_input("AIの具体的な役割を入力:", placeholder="例：小学生にもわかるように説明する科学の先生")
+            else:
+                ai_persona = persona_options[selected_persona_key]
+
             st.markdown("##### 2. 参考資料とWeb検索設定")
             st.markdown("<small>※ ファイル > 単一URL > Web検索 の優先順位で情報源として利用します。</small>", unsafe_allow_html=True)
             uploaded_files = st.file_uploader("参考ドキュメント (PDF/Word/Text):", type=['pdf', 'docx', 'txt'], accept_multiple_files=True)
@@ -313,24 +315,26 @@ if st.session_state["authentication_status"]:
             
             col1, col2 = st.columns(2)
             with col1:
-                search_count = st.slider("Web検索数（件）:", 1, 15, 5, help="参考資料がない場合にWeb検索する最大記事数。")
+                search_count = st.slider("Web検索数（件）:", min_value=1, max_value=15, value=5, help="参考資料がない場合にWeb検索する最大記事数。")
             with col2:
-                full_text_token_limit = st.slider("全文取得のトークン上限:", 5000, 150000, 20000, 5000, help="このトークン数までは記事の全文を使います。超えた分は要約されます。")
+                full_text_token_limit = st.slider("全文取得のトークン上限:", min_value=5000, max_value=150000, value=20000, step=5000, help="このトークン数までは記事の全文を使います。超えた分は要約されます。")
 
             st.markdown("##### 3. AIへの指示")
             selected_template_key = st.selectbox("行いたい作業を選択してください:", options=prompt_templates.keys())
-            user_prompt_template = prompt_templates[selected_template_key]
             if selected_template_key == "カスタム":
                 user_prompt_new = st.text_area("AIへの具体的な指示を入力してください:", placeholder="例：{topic}について比較表を作成してください。")
                 topic_new = ""
             else:
-                user_prompt_new = user_prompt_template
+                user_prompt_new = prompt_templates[selected_template_key]
                 topic_new = st.text_area("具体的なテーマやキーワードを入力してください:", placeholder="例：最新のAI技術")
 
             submitted_new = st.form_submit_button("記事を生成する", type="primary")
 
         if submitted_new:
-            final_prompt_new = user_prompt_new.format(topic=topic_new) if selected_template_key != "カスタム" else user_prompt_new
+            if selected_template_key != "カスタム":
+                final_prompt_new = user_prompt_new.format(topic=topic_new)
+            else:
+                final_prompt_new = user_prompt_new
             if not final_prompt_new or (selected_template_key != "カスタム" and not topic_new):
                 st.warning("作業内容とテーマの両方を入力してください。")
             elif not ai_persona:
@@ -351,32 +355,39 @@ if st.session_state["authentication_status"]:
             with st.form("edit_page_form"):
                 st.markdown("##### 1. AIの役割（ペルソナ）を選択")
                 selected_persona_key_edit = st.selectbox("AIのペルソナ:", options=persona_options.keys(), key="persona_edit", label_visibility="collapsed")
-                ai_persona_edit = st.text_input("AIの具体的な役割を入力:", value=persona_options.get(selected_persona_key_edit, ""), placeholder="カスタム選択時、または直接入力", key="custom_persona_edit") if selected_persona_key_edit == "カスタム" else persona_options[selected_persona_key_edit]
+                if selected_persona_key_edit == "カスタム":
+                    ai_persona_edit = st.text_input("AIの具体的な役割を入力:", placeholder="例：この記事の誤りを指摘する校正者", key="custom_persona_edit")
+                else:
+                    ai_persona_edit = persona_options[selected_persona_key_edit]
 
                 st.markdown("##### 2. 参考資料とWeb検索設定")
-                uploaded_files_edit = st.file_uploader("参考ドキュメント:", type=['pdf', 'docx', 'txt'], accept_multiple_files=True, key="uploader_edit")
-                source_url_edit = st.text_input("参考URL:", placeholder="https://example.com/article", key="source_url_edit")
+                st.markdown("<small>※ ファイル > 単一URL > Web検索 の優先順位で情報源として利用します。</small>", unsafe_allow_html=True)
+                uploaded_files_edit = st.file_uploader("参考ドキュメント (PDF/Word/Text):", type=['pdf', 'docx', 'txt'], accept_multiple_files=True, key="uploader_edit")
+                source_url_edit = st.text_input("参考URL (上記ファイルがない場合):", placeholder="https://example.com/article", key="source_url_edit")
                 
                 col1_edit, col2_edit = st.columns(2)
                 with col1_edit:
-                    search_count_edit = st.slider("Web検索数:", 1, 15, 5, key="slider_edit")
+                    search_count_edit = st.slider("Web検索数（件）:", min_value=1, max_value=15, value=5, help="参考資料がない場合にWeb検索する最大記事数。", key="slider_edit")
                 with col2_edit:
-                    full_text_token_limit_edit = st.slider("トークン上限:", 5000, 150000, 20000, 5000, key="slider_token_edit")
+                    full_text_token_limit_edit = st.slider("全文取得のトークン上限:", min_value=5000, max_value=150000, value=20000, step=5000, help="このトークン数までは記事の全文を使います。超えた分は要約されます。", key="slider_token_edit")
 
                 st.markdown("##### 3. AIへの指示")
-                selected_template_key_edit = st.selectbox("行いたい作業:", options=prompt_templates.keys(), key="template_edit")
-                user_prompt_template_edit = prompt_templates[selected_template_key_edit]
+                selected_template_key_edit = st.selectbox("行いたい作業を選択してください:", options=prompt_templates.keys(), key="template_edit")
                 if selected_template_key_edit == "カスタム":
-                    user_prompt_edit = st.text_area("AIへの具体的な指示:", placeholder="例：この記事に{topic}の情報を追記してください。")
+                    user_prompt_edit = st.text_area("AIへの具体的な指示を入力してください:", placeholder="例：この記事に{topic}の情報を追記してください。")
                     topic_edit = ""
                 else:
-                    user_prompt_edit = user_prompt_template_edit
-                    topic_edit = st.text_area("具体的なテーマやキーワード:", placeholder="例：ビジネスでの具体的な活用事例")
+                    user_prompt_edit = prompt_templates[selected_template_key_edit]
+                    topic_edit = st.text_area("具体的なテーマやキーワードを入力してください:", placeholder="例：ビジネスでの具体的な活用事例")
 
                 submitted_edit = st.form_submit_button("編集・追記を実行する", type="primary")
 
             if submitted_edit:
-                final_prompt_edit = user_prompt_edit.format(topic=topic_edit) if selected_template_key_edit != "カスタム" else user_prompt_edit
+                if selected_template_key_edit != "カスタム":
+                    final_prompt_edit = user_prompt_edit.format(topic=topic_edit)
+                else:
+                    final_prompt_edit = user_prompt_edit
+                
                 if not final_prompt_edit or (selected_template_key_edit != "カスタム" and not topic_edit):
                     st.warning("作業内容とテーマの両方を入力してください。")
                 elif not ai_persona_edit:
@@ -394,16 +405,24 @@ elif st.session_state["authentication_status"] is None:
     
     with st.expander("パスワードをお忘れですか？"):
         try:
-            (username_of_forgotten_password, email_of_forgotten_password, new_random_password) = authenticator.forgot_password('main')
+            (username_of_forgotten_password,
+             email_of_forgotten_password,
+             new_random_password) = authenticator.forgot_password(
+                 location='main',
+                 fields={'Form name': 'パスワードリセット', 'Username': 'ユーザー名', 'Submit': '送信'}
+             )
+
             if username_of_forgotten_password:
                 st.success('新しい一時パスワードが生成されました。')
                 st.warning('**重要:** このパスワードを安全な場所にコピーし、ログイン後に必ずパスワードをリセットしてください。')
                 st.code(new_random_password)
+                
                 new_password_hash = config['credentials']['usernames'][username_of_forgotten_password]['password']
                 if update_password_in_firestore(username_of_forgotten_password, new_password_hash):
                     st.info('データベースのパスワードが更新されました。')
                 else:
                     st.error('データベースのパスワード更新に失敗しました。')
+
             elif username_of_forgotten_password == False:
                 st.error('ユーザー名が見つかりませんでした。')
         except Exception as e:
@@ -411,33 +430,50 @@ elif st.session_state["authentication_status"] is None:
             
     with st.expander("ユーザー名をお忘れですか？"):
         try:
-            (username_of_forgotten_username, email_of_forgotten_username) = authenticator.forgot_username('main')
+            (username_of_forgotten_username,
+             email_of_forgotten_username) = authenticator.forgot_username(
+                 location='main',
+                 fields={'Form name': 'ユーザー名検索', 'Email': 'メールアドレス', 'Submit': '検索'}
+             )
+            
             if username_of_forgotten_username:
-                st.success(f'あなたのユーザー名はこちらです: {username_of_forgotten_username}')
+                st.success('あなたのユーザー名はこちらです:')
+                st.info(username_of_forgotten_username)
             elif username_of_forgotten_username == False:
                 st.error('入力されたメールアドレスに紐づくユーザーが見つかりませんでした。')
         except Exception as e:
             st.error(e)
 
+    # ★★★ ここからが修正箇所 ★★★
     try:
-        if authenticator.register_user('main', preauthorization=False):
-            username = st.session_state['username']
-            email = st.session_state['email']
-            name = st.session_state['name']
-            
+        email, username, name = authenticator.register_user(
+            location='main',
+            fields={'Form name': '新規ユーザー登録', 'Username': 'ユーザー名 (半角英数字のみ)', 'Email': 'メールアドレス', 'Name': '氏名', 'Password': 'パスワード', 'Repeat password': 'パスワードを再入力', 'Register': '登録する'}
+        )
+
+        if email:
             logging.info("ユーザー登録情報のFirestore保存処理を開始します。")
             try:
                 if username in config['credentials']['usernames']:
                     hashed_password = config['credentials']['usernames'][username]['password']
-                    if add_or_update_user_in_firestore(username, name, email, hashed_password):
-                        st.success('ユーザー登録が成功しました。再度ログインしてください。')
-                    else:
-                        st.error("データベースへのユーザー登録中にエラーが発生しました。")
+                    add_or_update_user_in_firestore(username, name, email, hashed_password)
+                    st.success('ユーザー登録が成功しました。再度ログインしてください。')
                 else:
                     logging.error(f"ユーザー '{username}' のパスワード情報がconfigに見つかりません。")
                     st.error("登録情報の取得に失敗しました。もう一度お試しください。")
             except Exception as e:
-                logging.error(f"Firestore保存処理でエラーが発生: {traceback.format_exc()}")
+                logging.error(f"Firestore保存処理でエラーが発生しました: {traceback.format_exc()}")
                 st.error("Firestoreへのユーザー登録中にエラーが発生しました。")
+
+    except stauth.utilities.exceptions.RegisterError as e:
+        error_message = str(e)
+        logging.warning(f"RegisterError発生: {error_message}")
+        # パスワードポリシーに関するエラーメッセージを親切に表示
+        if "Password must" in error_message:
+            st.error("パスワードは以下の要件を満たす必要があります：\n- 8文字以上\n- 1つ以上の小文字を含む\n- 1つ以上の大文字を含む\n- 1つ以上の数字を含む\n- 1つ以上の特殊文字を含む (@$!%*?&)")
+        else:
+            st.error(e)
     except Exception as e:
-        st.error(e)
+        logging.error(f"register_userウィジェットで予期せぬエラーが発生しました: {traceback.format_exc()}")
+        st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
+    # ★★★ ここまでが修正箇所 ★★★
