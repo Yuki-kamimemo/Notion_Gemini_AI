@@ -52,7 +52,7 @@ def get_content_from_single_url(url: str, status_placeholder):
 # ★★★ `time_limit` 引数を追加 ★★★
 def generate_content_from_web(user_prompt: str, search_count: int, full_text_token_limit: int, time_limit: str, status_placeholder, results_placeholder):
     status_placeholder.info("1/5: キーワード抽出中...")
-    keyword_prompt = f"リクエスト文：`{user_prompt}`\n\nこのリクエストに最も適したWeb検索キーワードを5つ以内でカンマ区切りで抜き出してください。"
+    keyword_prompt = f"リクエスト文：`{user_prompt}`\n\nこのリクエストに最も適したWeb検索キーワードを5つ以内で作成して検索してください。"
     try:
         keyword_response = st.session_state.gemini_lite_model.generate_content(keyword_prompt)
         search_keywords = keyword_response.text.strip().replace("\n", "") or user_prompt
