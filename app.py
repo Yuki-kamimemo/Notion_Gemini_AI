@@ -280,9 +280,31 @@ if st.session_state["authentication_status"]:
             status_placeholder = st.empty()
             results_placeholder = st.empty()
             if mode == "新しいページを作成する":
-                run_new_page_process(selected_db_id, final_prompt, ai_persona, uploaded_files, source_url, search_count, full_text_token_limit, time_limit_value, status_placeholder, results_placeholder)
+                run_new_page_process(
+                    database_id=selected_db_id, 
+                    user_prompt=final_prompt, 
+                    ai_persona=ai_persona, 
+                    uploaded_files=uploaded_files, 
+                    source_url=source_url, 
+                    search_count=search_count, 
+                    full_text_token_limit=full_text_token_limit, 
+                    time_limit=time_limit_value, 
+                    status_placeholder=status_placeholder, 
+                    results_placeholder=results_placeholder
+                )
             else:
-                run_edit_page_process(selected_page_id, final_prompt, ai_persona, uploaded_files, source_url, search_count, full_text_token_limit, time_limit_value, status_placeholder, results_placeholder)
+                run_edit_page_process(
+                    page_id=selected_page_id, 
+                    user_prompt=final_prompt, 
+                    ai_persona=ai_persona, 
+                    uploaded_files=uploaded_files, 
+                    source_url=source_url, 
+                    search_count=search_count, 
+                    full_text_token_limit=full_text_token_limit, 
+                    time_limit=time_limit_value, 
+                    status_placeholder=status_placeholder, 
+                    results_placeholder=results_placeholder
+                )
 
 elif st.session_state["authentication_status"] is False:
     st.error('ユーザー名かパスワードが間違っています')
@@ -331,7 +353,6 @@ elif st.session_state["authentication_status"] is None:
         except Exception as e:
             st.error(e)
 
-    # ★★★ ここからが修正箇所 ★★★
     try:
         email, username, name = authenticator.register_user(
             location='main',
@@ -363,4 +384,3 @@ elif st.session_state["authentication_status"] is None:
     except Exception as e:
         logging.error(f"register_userウィジェットで予期せぬエラーが発生しました: {traceback.format_exc()}")
         st.error(f"ユーザー登録フォームの表示中に予期せぬエラーが発生しました。")
-    # ★★★ ここまでが修正箇所 ★★★
