@@ -7,3 +7,9 @@ trafilatura
 httpx
 pdfplumber
 python-docx
+streamlit-authenticator
+bcrypt
+PyYAML
+cryptography
+google-cloud-firestore
+firebase-admin

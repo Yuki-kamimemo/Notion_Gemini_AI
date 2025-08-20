@@ -1,2 +1,5 @@
-.venv
-__pycache__
+config.yaml
+user_api_keys.json
+.venv/
+.env
+__pycache__/
